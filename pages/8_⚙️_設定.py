@@ -1,5 +1,6 @@
 import streamlit as st
 
+from utils import usage_tracker
 from utils.common import get_settings_password, render_sidebar
 from utils.gemini_client import get_api_key
 
@@ -58,3 +59,26 @@ else:
         "[Google AI Studio](https://aistudio.google.com/apikey) で"
         "無料のAPIキーを取得できます。"
     )
+
+st.divider()
+
+st.subheader("課金モード")
+
+current_paid_mode = usage_tracker.get_paid_mode()
+paid_mode_input = st.toggle(
+    "有料利用に切り替えました",
+    value=current_paid_mode,
+    help=(
+        "Google Cloud側で実際に有料アカウントへ切り替えた後にONにしてください。"
+        "ONにすると「📊 API利用状況」ページの課金履歴の入力欄・進捗バー・"
+        "残高目安の表示が有効になります。"
+    ),
+)
+if paid_mode_input != current_paid_mode:
+    usage_tracker.set_paid_mode(paid_mode_input)
+    st.rerun()
+
+if paid_mode_input:
+    st.caption("✅ 現在は「有料利用中」として扱われています。")
+else:
+    st.caption("🆓 現在は「無料枠を利用中」として扱われています（デフォルト）。")

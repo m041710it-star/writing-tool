@@ -9,6 +9,8 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from utils import usage_tracker
+
 load_dotenv()
 
 DEFAULT_MODEL = "gemini-flash-lite-latest"
@@ -42,14 +44,37 @@ def get_client() -> Optional[genai.Client]:
 
 
 def _raise_friendly_error(error: genai_errors.ClientError) -> None:
-    """429（クォータ超過）の場合は、モデル切り替えなどの案内を添えて例外を投げ直す。"""
+    """429（クォータ超過）の場合は、案内を添えて例外を投げ直す。
+
+    無料枠利用中（デフォルト）の場合のみ、有料切り替え時の注意点（予算アラートの
+    設定推奨）と、課金後にこのツールへ金額を反映させる手順を追加で案内する。
+    有料利用中（「⚙️ 設定」ページで切り替え済み）の場合はこの案内を出さない。
+    """
     if getattr(error, "code", None) == 429:
-        raise QuotaExceededError(
-            "Gemini APIの無料枠の上限（レート制限・クォータ）に達しました。"
+        message = (
+            "Gemini APIのレート制限・クォータの上限に達しました。"
             "しばらく時間をおいて再度お試しいただくか、"
             "サイドバーの「使用するモデル」を Gemini Flash-Lite など"
             "より軽量なモデルに切り替えてからもう一度実行してください。"
-        ) from error
+        )
+        if not usage_tracker.get_paid_mode():
+            message += (
+                "\n\n"
+                "- 無料枠の利用上限に達した可能性があります。\n"
+                "- 有料利用への切り替えを検討する場合は、想定外の高額請求を防ぐため、"
+                "先にGoogle Cloudで「支出上限（予算アラート）」を設定してから"
+                "切り替えることをおすすめします。\n"
+                "- 設定方法: "
+                "[支出予算とアラートを設定する（Google Cloud公式）]"
+                "(https://cloud.google.com/billing/docs/how-to/budgets)\n"
+                "- 実際に課金（支払い設定）をした場合は、「⚙️ 設定」ページで"
+                "「有料利用に切り替えました」をONにしたうえで、"
+                "「📊 API利用状況」ページの課金履歴の入力欄に、その課金金額を"
+                "入力してください。\n"
+                "- 金額を入力すると、サイドバーにトークンの残り目安が"
+                "表示されるようになります。"
+            )
+        raise QuotaExceededError(message) from error
     raise error
 
 

@@ -17,35 +17,41 @@ st.divider()
 
 st.subheader("💰 課金履歴")
 
-with st.form("billing_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        billing_date = st.date_input("日付", value=date.today())
-    with col2:
-        billing_amount = st.number_input("金額（円）", min_value=0, step=100)
-    billing_submitted = st.form_submit_button("追加")
-
-if billing_submitted:
-    if billing_amount > 0:
-        usage_tracker.add_billing_entry(billing_date.isoformat(), billing_amount)
-        st.success(f"{billing_date} に ¥{billing_amount:,.0f} を記録しました。")
-        st.rerun()
-    else:
-        st.warning("金額を入力してください。")
-
-billing_records = usage_tracker.get_billing_records()
-if billing_records:
-    st.dataframe(
-        [
-            {"日付": b["date"], "金額（円）": f"¥{b['amount_yen']:,.0f}"}
-            for b in sorted(billing_records, key=lambda b: b["date"], reverse=True)
-        ],
-        use_container_width=True,
-        hide_index=True,
+if not usage_tracker.get_paid_mode():
+    st.info(
+        "現在は無料枠でご利用中です。「⚙️ 設定」ページで「有料利用に切り替えました」を"
+        "ONにすると、ここから課金履歴を入力できるようになります。"
     )
-    st.caption(f"課金累計: ¥{sum(b['amount_yen'] for b in billing_records):,.0f}")
 else:
-    st.caption("まだ課金履歴が記録されていません。")
+    with st.form("billing_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            billing_date = st.date_input("日付", value=date.today())
+        with col2:
+            billing_amount = st.number_input("金額（円）", min_value=0, step=100)
+        billing_submitted = st.form_submit_button("追加")
+
+    if billing_submitted:
+        if billing_amount > 0:
+            usage_tracker.add_billing_entry(billing_date.isoformat(), billing_amount)
+            st.success(f"{billing_date} に ¥{billing_amount:,.0f} を記録しました。")
+            st.rerun()
+        else:
+            st.warning("金額を入力してください。")
+
+    billing_records = usage_tracker.get_billing_records()
+    if billing_records:
+        st.dataframe(
+            [
+                {"日付": b["date"], "金額（円）": f"¥{b['amount_yen']:,.0f}"}
+                for b in sorted(billing_records, key=lambda b: b["date"], reverse=True)
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(f"課金累計: ¥{sum(b['amount_yen'] for b in billing_records):,.0f}")
+    else:
+        st.caption("まだ課金履歴が記録されていません。")
 
 st.divider()
 

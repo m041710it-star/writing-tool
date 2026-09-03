@@ -20,9 +20,10 @@ tool_pages = [
 ]
 settings_page = st.Page("pages/8_⚙️_設定.py", title="設定", icon="⚙️")
 usage_page = st.Page("pages/10_📊_API利用状況.py", title="API利用状況", icon="📊")
+spec_page = st.Page("pages/11_📘_仕様書.py", title="仕様書", icon="📘")
 changelog_page = st.Page("pages/9_📜_変更履歴.py", title="変更履歴", icon="📜")
 
 pg = st.navigation(
-    [home_page, *tool_pages, settings_page, usage_page, changelog_page]
+    [home_page, *tool_pages, settings_page, usage_page, spec_page, changelog_page]
 )
 pg.run()

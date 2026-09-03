@@ -19,21 +19,33 @@ DEFAULT_PRICING = {
 
 def _load() -> dict[str, Any]:
     if not os.path.exists(DATA_FILE):
-        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy()}
+        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy(), "paid_mode": False}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
-        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy()}
+        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy(), "paid_mode": False}
     data.setdefault("usage", [])
     data.setdefault("billing", [])
     data.setdefault("pricing", DEFAULT_PRICING.copy())
+    data.setdefault("paid_mode", False)
     return data
 
 
 def _save(data: dict[str, Any]) -> None:
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def get_paid_mode() -> bool:
+    """有料利用に切り替え済みかどうか。デフォルトは無料枠利用中(False)。"""
+    return bool(_load()["paid_mode"])
+
+
+def set_paid_mode(paid_mode: bool) -> None:
+    data = _load()
+    data["paid_mode"] = bool(paid_mode)
+    _save(data)
 
 
 def get_pricing() -> dict[str, float]:

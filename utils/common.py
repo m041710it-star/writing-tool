@@ -47,20 +47,27 @@ def render_sidebar() -> None:
 
 
 def render_usage_progress(target=None) -> None:
-    """課金残高に対するAPI使用量の目安を、色分けした進捗バーで表示する。
+    """課金モードに応じて、利用状況（進捗バー・残高目安）を表示する。
 
+    無料枠利用中（デフォルト）は「現在は無料枠でご利用中です」という案内のみを表示する。
+    「⚙️ 設定」ページで有料利用に切り替えられている場合のみ、課金履歴に基づく
+    進捗バー・残高目安を表示する。
     `target` を省略するとサイドバーに表示する。`st`（本文エリア）を渡すと
     ページ本文にも同じ内容を表示できる。
     """
     if target is None:
         target = st.sidebar
 
+    if not usage_tracker.get_paid_mode():
+        target.caption("現在は無料枠でご利用中です")
+        return
+
     summary = usage_tracker.compute_summary()
 
     if summary["total_billing_yen"] <= 0:
         target.caption(
-            "現在は無料枠でご利用中です。正確な利用状況は"
-            "[Google AI Studio](https://aistudio.google.com/) でご確認ください。"
+            "有料利用に切り替わっています。「📊 API利用状況」ページの"
+            "課金履歴に金額を入力すると、残高の目安が表示されます。"
         )
         return
 
