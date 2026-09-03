@@ -1,12 +1,12 @@
 import streamlit as st
 
-from utils.common import render_output, render_sidebar
+from utils.common import render_output, render_sidebar, render_token_count
 from utils.gemini_client import generate_stream, get_api_key
+from utils.usage_tracker import record_usage
 
-st.set_page_config(page_title="タイトル生成", page_icon="💡", layout="wide")
 render_sidebar()
 
-st.title("💡 タイトル・見出し生成")
+st.title("💡 タイトル生成")
 st.caption("記事の内容やキーワードから、複数のタイトル案・見出し案を生成します。")
 
 with st.form("title_form"):
@@ -15,6 +15,8 @@ with st.form("title_form"):
         height=200,
         placeholder="例：初心者向けにNISAの始め方を解説する記事。つみたて投資の始め方、口座開設の手順を含む。",
     )
+
+    render_token_count(st.session_state.get("title_usage"), "input")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -32,7 +34,7 @@ with st.form("title_form"):
     )
 
 if not get_api_key():
-    st.info("サイドバーでGemini APIキーを設定すると生成できます。")
+    st.info("「⚙️ 設定」ページでGemini APIキーを設定すると生成できます。")
 
 if submitted:
     if not content.strip():
@@ -57,15 +59,23 @@ if submitted:
 
         st.divider()
         try:
+            usage_holder = {}
             with st.spinner("タイトルを生成しています..."):
                 result = st.write_stream(
                     generate_stream(
                         prompt,
                         system_instruction=system_instruction,
                         temperature=1.1,
+                        usage_holder=usage_holder,
                     )
                 )
             st.session_state["title_output"] = result
+            st.session_state["title_usage"] = usage_holder
+            record_usage(
+                "タイトル生成",
+                usage_holder.get("prompt_tokens", 0),
+                usage_holder.get("output_tokens", 0),
+            )
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
@@ -74,3 +84,4 @@ if submitted:
 if st.session_state.get("title_output"):
     st.divider()
     render_output(st.session_state["title_output"], "titles.txt", "title_output_area")
+    render_token_count(st.session_state.get("title_usage"), "output")

@@ -4,6 +4,7 @@ venv/
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+usage_data.json
 *.log
 .agents/
 .claude/

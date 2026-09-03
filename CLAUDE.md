@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## これは何か
 
-Gemini APIをラップした、個人利用向けのStreamlitマルチページアプリです。日本語のライティング作業（ブログ下書き、メール返信、要約、校正・リライト、トーン変換、タイトル生成、翻訳）を扱います。認証・データベースはなく、すべてセッション内で完結し、生成結果はダウンロードボタンで保存します。
+Gemini APIをラップした、個人利用向けのStreamlitマルチページアプリです。日本語のライティング作業（ブログ下書き、メール返信、要約、校正・リライト、文体変換、タイトル生成、翻訳）を扱います。データベースはなく、すべてセッション内で完結し、生成結果はダウンロードボタンで保存します。「設定」ページのみ簡易パスワード認証があり、それ以外のページに認証はありません。
 
 ## コマンド
 
@@ -17,30 +17,35 @@ streamlit run app.py              # アプリの起動 (http://localhost:8501)
 
 ## APIキーの解決順序
 
-`utils/gemini_client.py:get_api_key()` は以下の順でキーを確認します: サイドバーのテキスト入力 (`st.session_state["gemini_api_key"]`) → `.streamlit/secrets.toml` (`GEMINI_API_KEY`) → `.env` / 環境変数 (`GEMINI_API_KEY`)。新しいコードで環境変数を直接読むのではなく `get_api_key()` / `get_client()` を必ず経由させ、サイドバーからの上書きが効くようにしてください。
+`utils/gemini_client.py:get_api_key()` は以下の順でキーを確認します: 「設定」ページのテキスト入力 (`st.session_state["gemini_api_key"]`) → `.streamlit/secrets.toml` (`GEMINI_API_KEY`) → `.env` / 環境変数 (`GEMINI_API_KEY`)。新しいコードで環境変数を直接読むのではなく `get_api_key()` / `get_client()` を必ず経由させ、「設定」ページからの上書きが効くようにしてください。
 
 ## アーキテクチャ
 
-- `app.py` — ホーム画面。`render_sidebar()` を呼び出し、利用可能なツール一覧を表示するだけ。
-- `pages/N_<絵文字>_<名前>.py` — 各ライティング機能ごとに1ファイル。Streamlitのマルチページ規約に従い、先頭の数字がサイドバーの表示順、ファイル名がナビラベルになります。各ページは独立しており、他のページに依存しません。
-- `utils/gemini_client.py` — `google-genai` の薄いラッパー。`generate_stream()` はテキストをストリーミングで逐次yieldし（`st.write_stream` 用）、`generate_json()` は1回のリクエストで指定した `response_schema`（プレーンなJSON Schema辞書）に沿った構造化出力をまとめて受け取る（`json.loads(response.text)` を返す）。複数項目を無料枠のリクエスト回数を抑えて生成したい場合は後者を使う。モデル名・temperatureは、呼び出し側で指定しない限り `st.session_state`（サイドバーがセット）から読まれる。どちらの関数も `google.genai.errors.ClientError` の429（クォータ超過）を捕捉し、`QuotaExceededError`（`RuntimeError` のサブクラス）に変換してモデル切り替えを促すメッセージを付与する。既存ページの `except RuntimeError` はそのままこれも拾う。
-- `utils/common.py` — 共通UI。`render_sidebar()`（サイドバー最上部の🏠トップページへの `st.page_link`、APIキー入力、`MODEL_OPTIONS` からのモデル選択、temperatureスライダー）と `render_output()`（編集可能なテキストエリア＋結果のダウンロードボタン）。`MODEL_OPTIONS` は無料枠で安定しやすいFlash / Flash-Lite系を先頭にし、Proは無料枠の上限が低い旨をラベルに明記している。
+- `app.py` — ルーター。`st.set_page_config(...)` を1回だけ呼び出したうえで `st.Page(...)` を並べて `st.navigation([...]).run()` する。サイドバーのメニュー順序・ラベル・アイコンはここで一元管理しており、`pages/` 内のファイル名の連番は表示順に影響しない（人が識別しやすいよう慣習的に付けているだけ）。
+- `pages/0_🏠_トップページ.py` — ホーム画面本体。利用可能なツール一覧をカード表示する。
+- `pages/N_<絵文字>_<名前>.py`（N=1〜7） — 各ライティング機能ごとに1ファイル。各ページは独立しており、他のページに依存しません（8=設定、9=変更履歴、10=API利用状況は番号を空けて別枠にしている）。
+- `pages/8_⚙️_設定.py` — Gemini APIキーの入力欄。`st.session_state["gemini_api_key"]` を更新する唯一の場所（サイドバーには表示しない）。`utils/common.py:get_settings_password()`（`SETTINGS_PASSWORD`: `.streamlit/secrets.toml` > `.env`/環境変数）と一致するパスワードを入力し `st.session_state["settings_authenticated"]` が真になるまで、ページ本体（APIキー入力欄）は表示されない。このページ限定の認証であり、他のページには影響しない。`SETTINGS_PASSWORD` 未設定時はページ自体を利用不可にする（フェイルクローズ）。
+- `pages/9_📜_変更履歴.py` — リポジトリ直下の `CHANGELOG.md` を読み込んで表示するだけ。変更履歴を追記するときはこのMarkdownファイルを更新すればページ側の修正は不要。
+- `pages/10_📊_API利用状況.py` — `utils/usage_tracker.py` が管理する利用履歴・課金履歴・単価設定を一覧表示し、課金額の入力や単価の変更を行うページ。認証なし。
+- `utils/gemini_client.py` — `google-genai` の薄いラッパー。`generate_stream()` はテキストをストリーミングで逐次yieldし（`st.write_stream` 用）、`generate_json()` は1回のリクエストで指定した `response_schema`（プレーンなJSON Schema辞書）に沿った構造化出力をまとめて受け取る（`json.loads(response.text)` を返す）。複数項目を無料枠のリクエスト回数を抑えて生成したい場合は後者を使う。モデル名・temperatureは、呼び出し側で指定しない限り `st.session_state`（サイドバーがセット）から読まれ、未設定時のフォールバックは `DEFAULT_MODEL`（現在 `gemini-flash-lite-latest`）。どちらの関数も `google.genai.errors.ClientError` の429（クォータ超過）を捕捉し、`QuotaExceededError`（`RuntimeError` のサブクラス）に変換してモデル切り替えを促すメッセージを付与する。既存ページの `except RuntimeError` はそのままこれも拾う。`generate_stream()`/`generate_json()` に空の辞書を `usage_holder=` で渡すと、完了後に `prompt_tokens`/`output_tokens`/`total_tokens` が書き込まれる（`render_token_count()` での表示、`record_usage()` への記録に使う）。
+- `utils/common.py` — 共通UI。`render_sidebar()`（`MODEL_OPTIONS` からのモデル選択、`render_usage_progress()` による残高進捗バー、temperatureスライダー、APIキー設定状況の表示のみ。APIキー入力欄自体は含まない）、`render_token_count(usage, kind)`（入力欄・出力欄それぞれのトークン数キャプション）、`render_usage_progress(target=None)`（省略時はサイドバー、`st` を渡すとページ本文にも表示可能）、`render_output()`（編集可能なテキストエリア＋結果のダウンロードボタン）。`MODEL_OPTIONS` は無料枠で安定しやすいFlash-Lite / Flash系を先頭にし（Flash-Liteがデフォルト選択）、Proは無料枠の上限が低い旨をラベルに明記している。
+- `utils/usage_tracker.py` — トークン数・概算コストの利用履歴、課金履歴、入出力単価をリポジトリ直下の `usage_data.json`（`.gitignore` 済み・外部送信なし）に読み書きする。生成に成功した各ページは `record_usage(page_name, input_tokens, output_tokens)` を呼んで1件記録する。`compute_summary()` が「課金累計 ÷ 実績ベースの単価」から算出する `target_tokens`（使用可能な目安トークン数）と実績トークン数の比率 `usage_ratio` を返し、`render_usage_progress()` の色分け（80%で警告色・100%超で赤）に使われる。
 
 ## ページの共通パターン
 
-`pages/` 内の各ページは同じ構成に従っています。新しいツールを追加する際はゼロから書かず、既存ページ（例: `pages/4_✏️_校正リライト.py`）をコピーしてください。
+`pages/` 内の各ツールページ（1〜7）は同じ構成に従っています。新しいツールを追加する際はゼロから書かず、既存ページ（例: `pages/4_✏️_校正リライト.py`）をコピーしてください。`st.set_page_config(...)` は `app.py` が1回だけ呼び出すため、個々のページファイルでは呼ばないこと（二重に呼ぶとエラーになる）。新しいページを追加したら `app.py` の `st.navigation([...])` にも `st.Page(...)` を追加してメニューに載せる。
 
-1. `st.set_page_config(...)` の後に `render_sidebar()` を呼ぶ。
+1. 先頭で `render_sidebar()` を呼ぶ。
 2. 入力項目は `st.form(...)` の中にまとめ、最後に `st.form_submit_button(..., disabled=not get_api_key())` を置く。
-3. 送信時: 必須項目を `st.warning` で検証し、ラベル付きセクション（`# セクション名\n内容`）からプロンプト文字列を組み立て、タスク固有の `system_instruction` を定義したうえで、`st.spinner` 内で `st.write_stream()` 経由の `generate_stream()` を呼び出す。
-4. 結果は `st.session_state["<tool>_output"]` に保存し、フォームの後段で `render_output(text, filename, area_key)` を使って表示する（こうすることで送信直後だけでなく再実行後も結果が表示され続ける）。
+3. 送信時: 必須項目を `st.warning` で検証し、ラベル付きセクション（`# セクション名\n内容`）からプロンプト文字列を組み立て、タスク固有の `system_instruction` を定義したうえで、`st.spinner` 内で `st.write_stream()` 経由の `generate_stream()` を呼び出す（`usage_holder={}` を渡す）。
+4. 結果は `st.session_state["<tool>_output"]` に、トークン数は `st.session_state["<tool>_usage"]` に保存し、`record_usage("<ページ表示名>", ...)` で利用履歴に記録する。フォームの後段で `render_output(text, filename, area_key)` を使って表示する（こうすることで送信直後だけでなく再実行後も結果が表示され続ける）。入力欄の直後・出力欄の直後にそれぞれ `render_token_count(usage, "input"/"output")` を呼んでトークン数を表示する。
 5. 生成処理の呼び出しは `try/except RuntimeError`（`generate_stream` からのAPIキー未設定メッセージ用）と、それ以外のエラー用の `except Exception` で囲み、いずれも `st.error` で表示する。
 
 temperatureは基本的にサイドバーの値（`st.session_state.get("gemini_temperature", 1.0)`）を使いますが、より確定的な出力が必要なタスク（例: 校正では固定値 `0.4`）では例外的に固定しています。
 
 ## 例外: ブログ記事作成ページの2モード構成
 
-`pages/1_📝_ブログ記事作成.py` は上記の単純なパターンから分岐しており、`st.form(...)` の外に置いた `st.radio`（記事タイプ: note記事 / Webブログ記事）で条件付きフォームを実現している（フォーム内の要素はsubmitまでrerunされないため、条件分岐させたい入力はフォームの外側の要素で制御する必要がある）。
+`pages/1_📝_ブログ記事作成.py` は上記の単純なパターンから分岐しており、`st.form(...)` の外に置いた `st.selectbox`（記事タイプ: note記事 / Webブログ記事、および note記事モードでの「トーン」）で条件付きフォームを実現している（フォーム内の要素はsubmitまでrerunされないため、条件分岐させたい入力はフォームの外側の要素で制御する必要がある）。同様に `pages/2_✉️_メール返信作成.py` の「トーン」も、「カスタム」選択時に自由入力欄を出すためフォームの外に置いている。
 
 - **note記事**: 既存のシンプルな `generate_stream()` ストリーミング生成フローをそのまま維持（`st.session_state["blog_output"]`）。
 - **Webブログ記事（SEO重視）**: `generate_json()` を1回だけ呼び、`title_candidates` / `meta_description` / `body` / `faq` をまとめて生成して `st.session_state["blog_seo_result"]` に保存する。新しいSEO関連の出力項目を増やす場合は、ページ内の `SEO_BLOG_SCHEMA` にプロパティを足し、プロンプトの指示文にも生成してほしい項目を明記すること（スキーマだけ変えてもモデルには伝わらない）。

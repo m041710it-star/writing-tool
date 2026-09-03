@@ -1,9 +1,9 @@
 import streamlit as st
 
-from utils.common import render_output, render_sidebar
+from utils.common import render_output, render_sidebar, render_token_count
 from utils.gemini_client import generate_json, generate_stream, get_api_key
+from utils.usage_tracker import record_usage
 
-st.set_page_config(page_title="ブログ記事作成", page_icon="📝", layout="wide")
 render_sidebar()
 
 st.title("📝 ブログ記事作成")
@@ -33,16 +33,41 @@ SEO_BLOG_SCHEMA = {
     "required": ["title_candidates", "meta_description", "body", "faq"],
 }
 
-article_type = st.radio(
+article_type = st.selectbox(
     "記事タイプ",
     ["note記事（エッセイ・体験談風）", "Webブログ記事（SEO重視）"],
-    horizontal=True,
     key="blog_article_type",
 )
 is_seo = article_type.startswith("Webブログ")
 
+tone_choice = None
+custom_tone_text = ""
+if not is_seo:
+    tone_options = [
+        "丁寧・解説調",
+        "カジュアル・親しみやすい",
+        "専門的・硬め",
+        "ユーモアを交えて",
+        "カスタム",
+    ]
+    col_tone1, col_tone2 = st.columns(2)
+    with col_tone1:
+        tone_choice = st.selectbox("トーン", tone_options, key="blog_tone_choice")
+    if tone_choice == "カスタム":
+        with col_tone2:
+            custom_tone_text = st.text_input(
+                "カスタムトーン（自由入力）",
+                placeholder="例：関西弁で親しみやすく",
+                key="blog_custom_tone",
+            )
+
 with st.form("blog_form"):
-    topic = st.text_input("記事のテーマ・タイトル案", placeholder="例：初心者向けのNISA活用法")
+    topic = st.text_input("記事のテーマ", placeholder="例：初心者向けのNISA活用法")
+    title_idea = st.text_input(
+        "タイトル案（任意）", placeholder="例：初心者でも失敗しないNISAの始め方"
+    )
+
+    render_token_count(st.session_state.get("blog_usage"), "input")
 
     if is_seo:
         main_keyword = st.text_input(
@@ -71,18 +96,11 @@ with st.form("blog_form"):
         audience = st.text_input("想定読者", placeholder="例：投資を始めたばかりの20代会社員")
         keywords = st.text_input("含めたいキーワード（カンマ区切り）", placeholder="例：NISA, つみたて投資, 節税")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            tone = st.selectbox(
-                "トーン",
-                ["丁寧・解説調", "カジュアル・親しみやすい", "専門的・硬め", "ユーモアを交えて"],
-            )
-        with col2:
-            length = st.selectbox(
-                "文章量の目安",
-                ["短め（600字程度）", "標準（1200字程度）", "長め（2000字以上）"],
-                index=1,
-            )
+        length = st.selectbox(
+            "文章量の目安",
+            ["短め（600字程度）", "標準（1200字程度）", "長め（2000字以上）"],
+            index=1,
+        )
 
         structure = st.multiselect(
             "含めたい構成要素",
@@ -97,9 +115,11 @@ with st.form("blog_form"):
     )
 
 if not get_api_key():
-    st.info("サイドバーでGemini APIキーを設定すると生成できます。")
+    st.info("「⚙️ 設定」ページでGemini APIキーを設定すると生成できます。")
 
 if submitted:
+    tone = (custom_tone_text or "カスタム") if tone_choice == "カスタム" else tone_choice
+
     if not topic:
         st.warning("テーマを入力してください。")
     elif is_seo and not main_keyword:
@@ -107,9 +127,11 @@ if submitted:
     elif is_seo:
         prompt_parts = [
             "以下の条件でSEOを意識したWebブログ記事を執筆してください。",
-            f"# テーマ・タイトル案\n{topic}",
-            f"# メインキーワード\n{main_keyword}",
+            f"# 記事のテーマ\n{topic}",
         ]
+        if title_idea:
+            prompt_parts.append(f"# タイトル案（参考）\n{title_idea}")
+        prompt_parts.append(f"# メインキーワード\n{main_keyword}")
         if sub_keywords:
             prompt_parts.append(f"# 関連キーワード\n{sub_keywords}")
         prompt_parts.append(f"# 想定読者（ペルソナ）\n{persona}")
@@ -144,14 +166,22 @@ if submitted:
 
         st.divider()
         try:
+            usage_holder = {}
             with st.spinner("記事一式（本文・タイトル案・メタ情報など）を生成しています..."):
                 result = generate_json(
                     prompt,
                     schema=SEO_BLOG_SCHEMA,
                     system_instruction=system_instruction,
                     temperature=st.session_state.get("gemini_temperature", 1.0),
+                    usage_holder=usage_holder,
                 )
             st.session_state["blog_seo_result"] = result
+            st.session_state["blog_usage"] = usage_holder
+            record_usage(
+                "ブログ記事作成",
+                usage_holder.get("prompt_tokens", 0),
+                usage_holder.get("output_tokens", 0),
+            )
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
@@ -161,6 +191,8 @@ if submitted:
             "以下の条件でnote向けのエッセイ・体験談風のブログ記事を執筆してください。",
             f"# テーマ\n{topic}",
         ]
+        if title_idea:
+            prompt_parts.append(f"# タイトル案（参考）\n{title_idea}")
         if audience:
             prompt_parts.append(f"# 想定読者\n{audience}")
         if keywords:
@@ -185,15 +217,23 @@ if submitted:
 
         st.divider()
         try:
+            usage_holder = {}
             with st.spinner("記事を生成しています..."):
                 result = st.write_stream(
                     generate_stream(
                         prompt,
                         system_instruction=system_instruction,
                         temperature=st.session_state.get("gemini_temperature", 1.0),
+                        usage_holder=usage_holder,
                     )
                 )
             st.session_state["blog_output"] = result
+            st.session_state["blog_usage"] = usage_holder
+            record_usage(
+                "ブログ記事作成",
+                usage_holder.get("prompt_tokens", 0),
+                usage_holder.get("output_tokens", 0),
+            )
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
@@ -234,6 +274,9 @@ if st.session_state.get("blog_seo_result"):
             with st.expander(item.get("question", "")):
                 st.write(item.get("answer", ""))
 
+    render_token_count(st.session_state.get("blog_usage"), "output")
+
 if st.session_state.get("blog_output"):
     st.divider()
     render_output(st.session_state["blog_output"], "blog_post.md", "blog_output_area")
+    render_token_count(st.session_state.get("blog_usage"), "output")

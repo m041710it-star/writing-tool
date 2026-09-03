@@ -1,19 +1,21 @@
 import streamlit as st
 
-from utils.common import render_output, render_sidebar
+from utils.common import render_output, render_sidebar, render_token_count
 from utils.gemini_client import generate_stream, get_api_key
+from utils.usage_tracker import record_usage
 
-st.set_page_config(page_title="トーン変換", page_icon="🎨", layout="wide")
 render_sidebar()
 
-st.title("🎨 トーン変換")
+st.title("🎨 文体変換")
 st.caption("文章の口調（ビジネス敬語・カジュアル・フレンドリーなど）を変換します。")
 
 with st.form("tone_form"):
     text_input = st.text_area("変換したい文章", height=250)
 
+    render_token_count(st.session_state.get("tone_usage"), "input")
+
     target_tone = st.selectbox(
-        "変換後のトーン",
+        "変換後の文章の口調",
         [
             "ビジネス敬語（フォーマル）",
             "カジュアル・フランク",
@@ -24,14 +26,14 @@ with st.form("tone_form"):
         ],
     )
 
-    keep_length = st.checkbox("元の文章量をなるべく保つ", value=True)
+    keep_length = st.checkbox("元の文章の長さをできるだけ変えずに変換する", value=True)
 
     submitted = st.form_submit_button(
         "🚀 変換する", type="primary", disabled=not get_api_key()
     )
 
 if not get_api_key():
-    st.info("サイドバーでGemini APIキーを設定すると生成できます。")
+    st.info("「⚙️ 設定」ページでGemini APIキーを設定すると生成できます。")
 
 if submitted:
     if not text_input.strip():
@@ -39,7 +41,7 @@ if submitted:
     else:
         prompt_parts = [
             f"# 対象の文章\n{text_input}",
-            f"# 変換後のトーン\n{target_tone}",
+            f"# 変換後の文章の口調\n{target_tone}",
         ]
         if keep_length:
             prompt_parts.append("元の文章と近い分量に収めてください。")
@@ -56,15 +58,23 @@ if submitted:
 
         st.divider()
         try:
+            usage_holder = {}
             with st.spinner("変換しています..."):
                 result = st.write_stream(
                     generate_stream(
                         prompt,
                         system_instruction=system_instruction,
                         temperature=0.7,
+                        usage_holder=usage_holder,
                     )
                 )
             st.session_state["tone_output"] = result
+            st.session_state["tone_usage"] = usage_holder
+            record_usage(
+                "文体変換",
+                usage_holder.get("prompt_tokens", 0),
+                usage_holder.get("output_tokens", 0),
+            )
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
@@ -73,3 +83,4 @@ if submitted:
 if st.session_state.get("tone_output"):
     st.divider()
     render_output(st.session_state["tone_output"], "tone_converted.txt", "tone_output_area")
+    render_token_count(st.session_state.get("tone_usage"), "output")

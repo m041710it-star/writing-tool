@@ -11,7 +11,7 @@ from google.genai import types
 
 load_dotenv()
 
-DEFAULT_MODEL = "gemini-flash-latest"
+DEFAULT_MODEL = "gemini-flash-lite-latest"
 
 
 class QuotaExceededError(RuntimeError):
@@ -19,7 +19,7 @@ class QuotaExceededError(RuntimeError):
 
 
 def get_api_key() -> Optional[str]:
-    """優先順位: サイドバーで入力したキー > secrets.toml > 環境変数(.env)"""
+    """優先順位: 「設定」ページで入力したキー > secrets.toml > 環境変数(.env)"""
     session_key = st.session_state.get("gemini_api_key")
     if session_key:
         return session_key
@@ -53,18 +53,32 @@ def _raise_friendly_error(error: genai_errors.ClientError) -> None:
     raise error
 
 
+def _record_usage(usage_holder: Optional[dict], usage_metadata: Any) -> None:
+    if usage_holder is None or usage_metadata is None:
+        return
+    usage_holder["prompt_tokens"] = usage_metadata.prompt_token_count
+    usage_holder["output_tokens"] = usage_metadata.candidates_token_count
+    usage_holder["total_tokens"] = usage_metadata.total_token_count
+
+
 def generate_stream(
     prompt: str,
     *,
     system_instruction: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 1.0,
+    usage_holder: Optional[dict] = None,
 ) -> Iterator[str]:
-    """Geminiにプロンプトを送り、テキストチャンクを逐次yieldする。"""
+    """Geminiにプロンプトを送り、テキストチャンクを逐次yieldする。
+
+    `usage_holder` に空の辞書を渡すと、ストリーミング完了時点でその辞書に
+    `prompt_tokens` / `output_tokens` / `total_tokens` が書き込まれる
+    （呼び出し側で`st.write_stream()`実行後に参照する）。
+    """
     client = get_client()
     if client is None:
         raise RuntimeError(
-            "Gemini APIキーが設定されていません。サイドバーからAPIキーを入力してください。"
+            "Gemini APIキーが設定されていません。「⚙️ 設定」ページでAPIキーを入力してください。"
         )
 
     config = types.GenerateContentConfig(
@@ -81,6 +95,7 @@ def generate_stream(
         for chunk in stream:
             if chunk.text:
                 yield chunk.text
+            _record_usage(usage_holder, chunk.usage_metadata)
     except genai_errors.ClientError as e:
         _raise_friendly_error(e)
 
@@ -92,16 +107,19 @@ def generate_json(
     system_instruction: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 1.0,
+    usage_holder: Optional[dict] = None,
 ) -> dict[str, Any]:
     """Geminiに1回だけリクエストを送り、指定したJSONスキーマに沿った結果をまとめて受け取る。
 
     本文・タイトル案・メタディスクリプションなど複数項目を、無料枠のリクエスト回数を
     抑えるために1回のAPI呼び出しでまとめて生成したい場合に使う。
+    `usage_holder` に空の辞書を渡すと、`prompt_tokens` / `output_tokens` / `total_tokens`
+    が書き込まれる。
     """
     client = get_client()
     if client is None:
         raise RuntimeError(
-            "Gemini APIキーが設定されていません。サイドバーからAPIキーを入力してください。"
+            "Gemini APIキーが設定されていません。「⚙️ 設定」ページでAPIキーを入力してください。"
         )
 
     config = types.GenerateContentConfig(
@@ -119,6 +137,8 @@ def generate_json(
         )
     except genai_errors.ClientError as e:
         _raise_friendly_error(e)
+
+    _record_usage(usage_holder, response.usage_metadata)
 
     try:
         return json.loads(response.text)

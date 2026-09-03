@@ -1,9 +1,9 @@
 import streamlit as st
 
-from utils.common import render_output, render_sidebar
+from utils.common import render_output, render_sidebar, render_token_count
 from utils.gemini_client import generate_stream, get_api_key
+from utils.usage_tracker import record_usage
 
-st.set_page_config(page_title="文章要約", page_icon="📄", layout="wide")
 render_sidebar()
 
 st.title("📄 文章要約")
@@ -18,6 +18,8 @@ with st.form("summary_form"):
     text_input = st.text_area(
         "要約したい文章", value=source_text, height=300, placeholder="ここに文章を貼り付けてください"
     )
+
+    render_token_count(st.session_state.get("summary_usage"), "input")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -36,7 +38,7 @@ with st.form("summary_form"):
     )
 
 if not get_api_key():
-    st.info("サイドバーでGemini APIキーを設定すると生成できます。")
+    st.info("「⚙️ 設定」ページでGemini APIキーを設定すると生成できます。")
 
 if submitted:
     if not text_input.strip():
@@ -61,15 +63,23 @@ if submitted:
 
         st.divider()
         try:
+            usage_holder = {}
             with st.spinner("要約しています..."):
                 result = st.write_stream(
                     generate_stream(
                         prompt,
                         system_instruction=system_instruction,
                         temperature=0.5,
+                        usage_holder=usage_holder,
                     )
                 )
             st.session_state["summary_output"] = result
+            st.session_state["summary_usage"] = usage_holder
+            record_usage(
+                "文章要約",
+                usage_holder.get("prompt_tokens", 0),
+                usage_holder.get("output_tokens", 0),
+            )
         except RuntimeError as e:
             st.error(str(e))
         except Exception as e:
@@ -78,3 +88,4 @@ if submitted:
 if st.session_state.get("summary_output"):
     st.divider()
     render_output(st.session_state["summary_output"], "summary.txt", "summary_output_area")
+    render_token_count(st.session_state.get("summary_usage"), "output")
