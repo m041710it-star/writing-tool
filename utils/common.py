@@ -5,24 +5,27 @@ from typing import Optional
 import streamlit as st
 
 from utils import usage_tracker
-from utils.gemini_client import get_api_key
-
-MODEL_OPTIONS = {
-    "Gemini Flash-Lite（軽量・低コスト／無料枠向け）": "gemini-flash-lite-latest",
-    "Gemini Flash（高速・バランス型／無料枠向け）": "gemini-flash-latest",
-    "Gemini Pro（高精度・じっくり／無料枠の上限が低め）": "gemini-pro-latest",
-}
+from utils.gemini_client import FREE_TIER_DISCLAIMER, QuotaExceededError, get_api_key
+from utils.models import (
+    MODEL_DESCRIPTIONS,
+    MODEL_LABELS,
+    MODEL_OPTIONS,
+    get_lighter_model,
+    get_model_weight_tier,
+)
 
 
 def render_sidebar() -> None:
-    st.sidebar.header("⚙️ 設定")
-
     model_label = st.sidebar.selectbox(
-        "使用するモデル", list(MODEL_OPTIONS.keys()), index=0
+        "使用するモデル", list(MODEL_OPTIONS.keys()), index=0, key="gemini_model_label"
     )
-    st.session_state.gemini_model = MODEL_OPTIONS[model_label]
+    model_id = MODEL_OPTIONS[model_label]
+    st.session_state.gemini_model = model_id
+    st.sidebar.caption(MODEL_DESCRIPTIONS.get(model_id, ""))
 
-    render_usage_progress()
+    st.sidebar.divider()
+    render_usage_status()
+    st.sidebar.divider()
 
     st.session_state.gemini_temperature = st.sidebar.slider(
         "創造性（表現の幅）",
@@ -46,61 +49,89 @@ def render_sidebar() -> None:
         )
 
 
-def render_usage_progress(target=None) -> None:
-    """課金モードに応じて、利用状況（進捗バー・残高目安）を表示する。
+def _text_progress_bar(ratio: float, width: int = 8) -> str:
+    ratio = max(0.0, min(ratio, 1.0))
+    filled = round(ratio * width)
+    return "[" + "■" * filled + "□" * (width - filled) + "]"
 
-    無料枠利用中（デフォルト）は「現在は無料枠でご利用中です」という案内のみを表示する。
-    「⚙️ 設定」ページで有料利用に切り替えられている場合のみ、課金履歴に基づく
-    進捗バー・残高目安を表示する。
+
+def render_usage_status(target=None) -> None:
+    """無料枠・有料枠それぞれの利用状況を、まとめて表示する（あくまで簡易的な目安）。
+
+    Gemini APIには残量を取得する仕組みがないため、無料枠の状態は
+    「直近のAPI呼び出しで429（クォータ超過）が発生したかどうか」をもとにした
+    簡易表示にとどめる。有料枠は「⚙️ 設定」ページで「有料利用に切り替えました」が
+    ONの場合のみ、課金履歴に基づく進捗バー・残高目安を表示する（OFFの間は「未設定」）。
+    このトグルは無料枠の状態に関わらず、いつでもユーザーの意思でON/OFFできる。
     `target` を省略するとサイドバーに表示する。`st`（本文エリア）を渡すと
     ページ本文にも同じ内容を表示できる。
     """
     if target is None:
         target = st.sidebar
 
-    if not usage_tracker.get_paid_mode():
-        target.caption("現在は無料枠でご利用中です")
-        return
+    target.caption("📊 API利用状況（※簡易的な目安です）")
 
-    summary = usage_tracker.compute_summary()
-
-    if summary["total_billing_yen"] <= 0:
-        target.caption(
-            "有料利用に切り替わっています。「📊 API利用状況」ページの"
-            "課金履歴に金額を入力すると、残高の目安が表示されます。"
-        )
-        return
-
-    ratio = summary["usage_ratio"]
-    percent = min(ratio, 1.0) * 100
-
-    if ratio >= 1.0:
-        color = "#e53935"
-    elif ratio >= 0.8:
-        color = "#fb8c00"
+    last_call = usage_tracker.get_last_call_status()
+    if last_call.get("status") == "quota_exceeded":
+        target.caption("無料枠: ⚠️ 利用制限に達した可能性があります（目安）")
     else:
-        color = "#43a047"
+        target.caption("無料枠: ✅ 利用可能（直近でエラーなし）")
 
-    used_display = f"{summary['total_tokens']:,}"
-    target_display = f"{summary['target_tokens']:,.0f}"
+    if not usage_tracker.get_paid_mode():
+        target.caption("有料枠: 未設定")
+        target.page_link("pages/8_⚙️_設定.py", label="設定はこちら", icon="⚙️")
+    else:
+        summary = usage_tracker.compute_summary()
+        if summary["total_billing_yen"] <= 0:
+            target.caption("有料枠: 切り替え済み（課金履歴は未入力です）")
+            target.caption(
+                "「📊 API利用状況」ページの課金履歴に金額を入力すると、"
+                "残高の目安が表示されます。"
+            )
+        else:
+            ratio = summary["usage_ratio"]
+            percent = min(ratio, 1.0) * 100
+            bar = _text_progress_bar(ratio)
+            balance_display = f"約{max(summary['balance_yen'], 0):,.0f}円分"
+            target.caption(
+                f"有料枠: `{bar}` {percent:.0f}%（残高目安: {balance_display}）"
+            )
+            if ratio >= 1.0:
+                target.caption("⚠️ 残高目安を超えている可能性があります。")
+            elif ratio >= 0.8:
+                target.caption("残高目安が少なくなってきています。")
 
-    target.markdown(
-        f"""
-<div style="margin: 4px 0 2px 0;">
-  <div style="background: var(--secondary-background-color, #e0e0e0); border-radius: 6px; height: 10px; overflow: hidden;">
-    <div style="width: {percent:.1f}%; background: {color}; height: 100%;"></div>
-  </div>
-  <div style="font-size: 0.75rem; margin-top: 4px; opacity: 0.85;">
-    {used_display} トークン / {target_display} トークン（目安）
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    target.caption(
-        "※この数値はアプリ内で計算した目安です。実際の請求額・残高は"
-        "[Google AI Studio](https://aistudio.google.com/) や"
-        "Google Cloudの公式画面でご確認ください。"
+    target.caption(FREE_TIER_DISCLAIMER)
+
+
+def render_api_error(error: Exception) -> None:
+    """ページ共通のAPIエラー表示。
+
+    `QuotaExceededError`（429）の場合は、メッセージ本文（モデル別の段階的な案内）に
+    加えて、より軽量なモデルへ切り替えるボタンと「⚙️ 設定」ページへのリンクを表示する。
+    それ以外のエラー（APIキー未設定など）は、従来どおりメッセージのみを表示する。
+    """
+    st.error(str(error))
+
+    model = getattr(error, "model", None)
+    if not isinstance(error, QuotaExceededError) or model is None:
+        return
+    if usage_tracker.get_paid_mode():
+        return
+
+    tier = get_model_weight_tier(model)
+    lighter = get_lighter_model(model)
+
+    if tier != "lightest" and lighter:
+        lighter_label = MODEL_LABELS.get(lighter, lighter)
+        if st.button(f"🍃 {lighter_label} に切り替える", key="quota_switch_lighter_model"):
+            st.session_state["gemini_model_label"] = lighter_label
+            st.rerun()
+
+    st.page_link(
+        "pages/8_⚙️_設定.py",
+        label="⚙️ 設定ページへ（有料切り替え・課金額の入力）",
+        icon="⚙️",
     )
 
 

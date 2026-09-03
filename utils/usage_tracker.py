@@ -16,19 +16,34 @@ DEFAULT_PRICING = {
     "output_price_per_million": 60.0,
 }
 
+DEFAULT_LAST_CALL = {"status": "ok", "model": None, "timestamp": None}
+
 
 def _load() -> dict[str, Any]:
     if not os.path.exists(DATA_FILE):
-        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy(), "paid_mode": False}
+        return {
+            "usage": [],
+            "billing": [],
+            "pricing": DEFAULT_PRICING.copy(),
+            "paid_mode": False,
+            "last_call": DEFAULT_LAST_CALL.copy(),
+        }
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
-        return {"usage": [], "billing": [], "pricing": DEFAULT_PRICING.copy(), "paid_mode": False}
+        return {
+            "usage": [],
+            "billing": [],
+            "pricing": DEFAULT_PRICING.copy(),
+            "paid_mode": False,
+            "last_call": DEFAULT_LAST_CALL.copy(),
+        }
     data.setdefault("usage", [])
     data.setdefault("billing", [])
     data.setdefault("pricing", DEFAULT_PRICING.copy())
     data.setdefault("paid_mode", False)
+    data.setdefault("last_call", DEFAULT_LAST_CALL.copy())
     return data
 
 
@@ -45,6 +60,36 @@ def get_paid_mode() -> bool:
 def set_paid_mode(paid_mode: bool) -> None:
     data = _load()
     data["paid_mode"] = bool(paid_mode)
+    _save(data)
+
+
+def get_last_call_status() -> dict[str, Any]:
+    """直近のAPI呼び出し結果（無料枠状態の簡易判定に使う）を返す。
+
+    Gemini APIには残量を取得する仕組みがないため、あくまで
+    「直近の呼び出しで429（クォータ超過）が発生したかどうか」を
+    もとにした簡易的な目安として扱う。
+    """
+    return _load()["last_call"]
+
+
+def set_last_call_ok() -> None:
+    data = _load()
+    data["last_call"] = {
+        "status": "ok",
+        "model": None,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _save(data)
+
+
+def set_last_call_quota_exceeded(model: str) -> None:
+    data = _load()
+    data["last_call"] = {
+        "status": "quota_exceeded",
+        "model": model,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
     _save(data)
 
 

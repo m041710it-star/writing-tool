@@ -3,15 +3,15 @@ from datetime import date
 import streamlit as st
 
 from utils import usage_tracker
-from utils.common import render_sidebar, render_usage_progress
+from utils.common import render_sidebar, render_usage_status
 
 render_sidebar()
 
 st.title("📊 API利用状況")
 st.caption("トークン数・概算コストの履歴、課金履歴、単価設定をここで管理します。")
 
-st.subheader("残高の目安")
-render_usage_progress(target=st)
+st.subheader("無料枠・有料枠の状況")
+render_usage_status(target=st)
 
 st.divider()
 

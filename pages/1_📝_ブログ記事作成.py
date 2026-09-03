@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.common import render_output, render_sidebar, render_token_count
+from utils.common import render_api_error, render_output, render_sidebar, render_token_count
 from utils.gemini_client import generate_json, generate_stream, get_api_key
 from utils.usage_tracker import record_usage
 
@@ -183,7 +183,7 @@ if submitted:
                 usage_holder.get("output_tokens", 0),
             )
         except RuntimeError as e:
-            st.error(str(e))
+            render_api_error(e)
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
     else:
@@ -235,7 +235,7 @@ if submitted:
                 usage_holder.get("output_tokens", 0),
             )
         except RuntimeError as e:
-            st.error(str(e))
+            render_api_error(e)
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
 
